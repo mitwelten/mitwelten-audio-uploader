@@ -6,6 +6,12 @@ Upload _Audio Moth_ recordings to storage for ML inference tasks.
 
 Use Nuitka to build the application bundles / binaries.
 
+```bash
+python -m nuitka --standalone --macos-create-app-bundle --enable-plugin=pyside6 \
+    --nofollow-import-to=IPython --nofollow-import-to=Pillow  --nofollow-import-to=matplotlib \
+    src/uploader_app.py
+```
+
 ## Usage
 
 - Attach storage medium
