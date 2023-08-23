@@ -168,7 +168,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
                 and os.listdir(rd.prefix)):
             return True
         else:
-            self.rds.reset()
+            self.rds.clearRootDevice()
             return False
 
     # ----- indexing
