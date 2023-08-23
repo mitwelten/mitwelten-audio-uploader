@@ -3,11 +3,10 @@ name: Executable Windows Build
 
 # Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
-    branches: [ "main", "master" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ main ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -47,4 +46,4 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: exe
-          path: build/hello_world.exe
+          path: build/uploader_app.exe
