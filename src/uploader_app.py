@@ -271,7 +271,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
 
     def toggleUploadThread(self):
         if not self.checkRootAvailable(): return
-        if not self.uploadWorker or (self.uploadWorker and isValid(self.uploadWorker)):
+        if not self.uploadWorker or (self.uploadWorker and not isValid(self.uploadWorker)):
             self.startUploadWorker()
         else:
             self.stopUploadWorker()
@@ -474,13 +474,13 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         c.close()
 
     def closeEvent(self, event):
-        if self.indexWorker and not isValid(self.indexWorker) and self.indexWorker.isRunning():
+        if self.indexWorker and isValid(self.indexWorker) and self.indexWorker.isRunning():
             self.stopIndexWorker()
             self.indexWorker.wait()
-        if self.metaWorker and not isValid(self.metaWorker) and self.metaWorker.isRunning():
+        if self.metaWorker and isValid(self.metaWorker) and self.metaWorker.isRunning():
             self.stopMetaWorker()
             self.metaWorker.wait()
-        if self.uploadWorker and not isValid(self.uploadWorker) and self.uploadWorker.isRunning():
+        if self.uploadWorker and isValid(self.uploadWorker) and self.uploadWorker.isRunning():
             self.stopUploadWorker()
             self.uploadWorker.wait()
         super(QMainWindow, self).closeEvent(event)
