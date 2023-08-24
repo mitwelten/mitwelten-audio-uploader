@@ -290,7 +290,7 @@ class UploadWorker(QThread):
                 if record_raw:
                     # transform record_raw to dictionary with colname: value
                     record = {k: record_raw[i] for (i,k) in enumerate(COLS)}
-
+                    record['timestamp'] = datetime.utcfromtimestamp(record['timestamp']).isoformat() + 'Z'
                     # check if file is readable. if not, wait
                     # try:
                     #     is_readable_file(record['path'])

@@ -71,7 +71,7 @@ def meta_worker(row):
             info['filter'] = 'NO_FILTER'
 
         timestamp = datetime.strptime(ts, "%H:%M:%S %d/%m/%Y")
-        info['timestamp'] = timestamp.replace(tzinfo=timezone(timedelta(hours=hrs, minutes=mins)))
+        info['timestamp'] = timestamp.replace(tzinfo=timezone(timedelta(hours=hrs, minutes=mins))).timestamp()
 
         amp_res = re.search(r'Amplitude threshold was ([^ ]+) with ([^ ]+)s minimum trigger duration\.', comment)
         if amp_res != None:
@@ -125,7 +125,7 @@ def meta_worker(row):
         # infer node name from path
         m = re.match(r'.*(\d{4}-\d{4}).+', path)
         if m == None:
-            raise Exception('Node label extraction failed', info['timestamp'].strftime('%Y.%m.%d %H:%M:%S'), info['serial_number'])
+            raise Exception('Node label extraction failed', info['sha256'], datetime.utcfromtimestamp(info['timestamp']).isoformat() + 'Z', info['serial_number'])
         info['node_label'] = m.groups()[0]
 
     except Exception as e:

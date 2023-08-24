@@ -454,10 +454,10 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
             battery text,
             temperature text,
             rec_end_status text,
-            indexed_at timestamp,
-            checked_at timestamp,
-            meta_uploaded_at timestamp,
-            file_uploaded_at timestamp,
+            indexed_at integer default (strftime('%s', 'now')),
+            checked_at integer,
+            meta_uploaded_at integer,
+            file_uploaded_at integer,
             root_id integer not null
         )''')
         c.execute('create index if not exists files_state_idx on files (state)')
@@ -467,8 +467,8 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
             uuid text unique NOT NULL,
             prefix text NOT NULL,
             label text,
-            created_at timestamp default current_timestamp,
-            updated_at timestamp default current_timestamp
+            created_at integer default (strftime('%s', 'now')),
+            updated_at integer default (strftime('%s', 'now'))
         )''')
         self.database.commit()
         c.close()
