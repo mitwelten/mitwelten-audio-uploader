@@ -12,7 +12,8 @@ jobs:
 
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        # TODO: add ubuntu-latest
+        os: [macos-latest, windows-latest]
       
     runs-on: ${{ matrix.os }}
 
