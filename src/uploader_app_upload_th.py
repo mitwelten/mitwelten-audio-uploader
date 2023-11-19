@@ -6,6 +6,7 @@ import sqlite3
 
 from PySide6.QtCore import QThread, Signal as pyqtSignal
 from multiprocessing.pool import ThreadPool
+from threading import Semaphore, Condition, Lock
 from queue import Queue, Empty as QueueEmpty
 from requests.auth import AuthBase
 from minio import Minio
@@ -26,16 +27,35 @@ class UploadWorker(QThread):
         self.database = sqlite3.connect(db, check_same_thread=False)
         self.root_device = root_device
         self.token = token
+        'OAuth token'
+
+        self.is_token_valid = True
+        '`is_token_valid` flag indicates whether the OAuth token is currently valid'
+
         self.semaphore = True
         self.session  = requests.Session()
         self.session.auth = BearerAuth(self.token)
+
+        self.feed_semaphore = Semaphore(1)
+        '`feed_semaphore` semaphore blocks the feeding of new tasks into the queue when the token is being refreshed'
+
+        self.token_condition = Condition()
+        '`token_condition` condition variable is used to notify all waiting threads when the token has been refreshed'
+
+        self.token_lock = Lock()
+        '`token_lock` is used to safely read the shared OAuth token `token`'
 
     def cancel(self):
         self.semaphore = False
 
     def setToken(self, token):
-        self.token = token
-        self.session.auth = BearerAuth(self.token)
+        '`setToken` slot, called when token has been refreshed in response to signal `tokenExpired`'
+        with self.token_condition:
+            '''setting new token, releasing the feed semaphore, notifying threads'''
+            self.token = token
+            self.is_token_valid = True  # Mark the new token as valid
+            self.feed_semaphore.release()  # Unblock the feeding of new tasks
+            self.token_condition.notify_all()  # Notify all waiting threads about the new token
 
     def setRootPrefix(self, root_device: RootDevice):
         self.root_device = root_device
@@ -74,6 +94,8 @@ class UploadWorker(QThread):
                 token = None
                 try:
                     record, token = queue.get()
+                    with self.token_lock:
+                        token = self.token
                 except:
                     print('Exiting thread, queue is empty')
                     return
@@ -191,7 +213,16 @@ class UploadWorker(QThread):
                 except requests.exceptions.HTTPError as e:
                     print('HTTP Error:', str(e))
                     if (e.response.status_code == 401):
-                        self.tokenExpired.emit()
+                        with self.token_condition:
+                            if self.is_token_valid:
+                                print('Thread detected session timeout. Refreshing token.')
+                                self.is_token_valid = False  # Mark the token as invalid
+                                self.feed_semaphore.acquire()  # Block the feeding of new tasks
+                                self.tokenExpired.emit() # trigger token refresh
+                            else:
+                                print('Thread waiting for token to be refreshed.')
+                                self.token_condition.wait()  # Wait for the token to be refreshed
+                                print('Thread received new token.')
                     # wait 10sec before trying on the next task
                     time.sleep(10)
                     # mark checked (ready for upload)
@@ -234,7 +265,9 @@ class UploadWorker(QThread):
             pool = ThreadPool(nthreads_upload, initializer=upload_worker, initargs=(queue,))
 
             for task in tasks:
+                self.feed_semaphore.acquire()
                 queue.put(task)
+                self.feed_semaphore.release()
                 if not self.semaphore:
                     raise ShutdownRequestException
 
