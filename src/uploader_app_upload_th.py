@@ -382,5 +382,5 @@ def connect_s3(crd) -> Minio:
 
 def check_api(expires_at: float) -> bool:
     delta = datetime.fromtimestamp(expires_at) - datetime.now()
-    return delta.seconds > 60
+    return delta.total_seconds() > 60
 
