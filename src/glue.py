@@ -6,6 +6,9 @@ from PySide6.QtCore import QObject, Signal as pyqtSignal
 class IndexingException(BaseException):
     ...
 
+class MetadataValidationException(BaseException):
+    ...
+
 class MetadataInsertException(BaseException):
     ...
 

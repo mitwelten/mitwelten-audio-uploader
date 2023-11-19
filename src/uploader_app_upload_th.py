@@ -13,7 +13,10 @@ from minio import Minio
 from minio.commonconfig import Tags
 
 from config import COLS, APIRUL
-from glue import is_readable_file, store_task_state, MetadataInsertException, ShutdownRequestException, RootDevice
+from glue import (
+    is_readable_file, store_task_state, MetadataValidationException,
+    MetadataInsertException, ShutdownRequestException, RootDevice
+)
 
 class UploadWorker(QThread):
 
@@ -111,16 +114,16 @@ class UploadWorker(QThread):
                 d = record
                 cur = conn.cursor()
 
-                # validate record against database
                 try:
+                    # validate record against database
                     r = session.post(f'{APIRUL}/validate/audio',
                         json={ k: d[k] for k in ('sha256', 'node_label', 'timestamp')}, auth=BearerAuth(token))
 
                     if r.status_code != 200:
                         if r.status_code == 401:
                             self.tokenExpired.emit()
-                            print('Token is expired? Reason:', r.reason)
-                        if VERBOSE: print(f"failed to validate metadata for {d['path']}: {validation['detail']}")
+                            print('Access denied, reason:', r.reason)
+                        if VERBOSE: print(f"failed to validate metadata for {d['path']}: {r.reason}")
                         r.raise_for_status()
 
                     validation = r.json()
@@ -129,24 +132,16 @@ class UploadWorker(QThread):
                         o = 'o' if validation['object_name_match'] else ''
                         cur.execute('update files set state = -3 where file_id = ?', [d['file_id']])
                         conn.commit()
-                        raise Exception(f"file exists in database ({h}{o}):", d['path'])
+                        raise MetadataValidationException(f"file exists in database ({h}{o}):", d['path'])
                     elif validation['node_deployed'] == False:
                         cur.execute('update files set state = -6 where file_id = ?', [d['file_id']])
                         conn.commit()
-                        raise Exception('node is/was not deployed at requested time:', d['node_label'], d['timestamp'])
+                        raise MetadataValidationException('node is/was not deployed at requested time:', d['node_label'], d['timestamp'])
                     else:
                         if VERBOSE: print('new file:', validation['object_name'])
                         d['object_name']   = validation['object_name']
                         d['deployment_id'] = validation['deployment_id']
 
-                except Exception as e:
-                    print('Validation failed:', str(e))
-                    cur.close()
-                    queue.task_done()
-                    continue
-
-                # upload procedure
-                try:
                     # upload to minio S3
                     tags = Tags(for_object=True)
                     tags['node_label'] = str(d['node_label'])
@@ -188,6 +183,13 @@ class UploadWorker(QThread):
                     where file_id = ?
                     ''', [d['file_id']])
                     conn.commit()
+
+                except MetadataValidationException as e:
+                    # -3: meta validation error
+                    # -6: node not deployed
+                    print('MetadataValidationException', str(e))
+                    cur.close()
+                    queue.task_done()
 
                 except MetadataInsertException as e:
                     # -5: meta insert error
