@@ -1,5 +1,6 @@
 from datetime import datetime
 import time
+import jwt
 import requests
 import traceback
 import sqlite3
@@ -37,7 +38,6 @@ class UploadWorker(QThread):
 
         self.semaphore = True
         self.session  = requests.Session()
-        self.session.auth = BearerAuth(self.token)
 
         self.feed_semaphore = Semaphore(1)
         '`feed_semaphore` semaphore blocks the feeding of new tasks into the queue when the token is being refreshed'
@@ -54,9 +54,11 @@ class UploadWorker(QThread):
     def setToken(self, token):
         '`setToken` slot, called when token has been refreshed in response to signal `tokenExpired`'
         with self.token_condition:
-            '''setting new token, releasing the feed semaphore, notifying threads'''
-            self.token = token
-            self.is_token_valid = True  # Mark the new token as valid
+            if token == None:
+                self.semaphore = False
+            else:
+                self.token = token
+                self.is_token_valid = True  # Mark the new token as valid
             self.feed_semaphore.release()  # Unblock the feeding of new tasks
             self.token_condition.notify_all()  # Notify all waiting threads about the new token
 
@@ -69,17 +71,21 @@ class UploadWorker(QThread):
         nthreads_upload = NTHREADS
 
         try:
-            r = self.session.get(f'{APIRUL}/login')
-            r.raise_for_status()
-            token_expires_at = r.json()['exp']
+            token_expires_at = jwt.decode(self.token, options={"verify_signature": False})['exp']
             if not check_api(token_expires_at):
+                self.feed_semaphore.acquire()
                 self.tokenExpired.emit()
-
-            r = self.session.get(f'{APIRUL}/auth/storage')
+                with self.token_condition:
+                    self.token_condition.wait()
+            with self.token_lock:
+                token = self.token
+            r = self.session.get(f'{APIRUL}/auth/storage', auth=BearerAuth(token))
             r.raise_for_status()
             storage_crd = r.json()
             storage = connect_s3(storage_crd)
         except:
+            print(traceback.format_exc())
+            print('closing session')
             self.session.close()
             return
 
@@ -224,7 +230,8 @@ class UploadWorker(QThread):
                             else:
                                 print('Thread waiting for token to be refreshed.')
                                 self.token_condition.wait()  # Wait for the token to be refreshed
-                                print('Thread received new token.')
+                                print('Thread refreshed the token.')
+                                # If failed, token is None, semaphore is false, worker thread will stop
                     # wait 10sec before trying on the next task
                     time.sleep(10)
                     # mark checked (ready for upload)

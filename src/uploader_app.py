@@ -78,6 +78,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         reply_handler.callbackReceived.connect(self.authHandler)
         self.oauth.granted.connect(self.authSuccessful)
         self.oauth.error.connect(self.authFailed)
+        self.oauth.tokenChanged.connect(self.onAuthTokenChanged)
 
     def connectSignalsSlots(self):
         self.pushButton_add_root.clicked.connect(self.addRoot)
@@ -354,11 +355,11 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         msg = f'''Signed in as {decoded_payload['name']} ({decoded_payload['preferred_username']})'''
         self.label_signinout.setText(msg)
         self.statusbar.showMessage(msg, 3000)
-        self.oauth.tokenChanged.connect(self.onAuthTokenChanged)
         self.checkReady()
 
     def authFailed(self, error: str):
         msg = f'''Authentication error: {error}'''
+        self.onAuthTokenChanged(None)
         self.label_signinout.setText(msg)
         self.statusbar.showMessage(msg, 3000)
         self.checkReady()
