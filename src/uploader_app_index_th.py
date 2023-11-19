@@ -2,6 +2,7 @@ import os
 import mimetypes
 import re
 import traceback
+import logging
 
 from PySide6.QtCore import QThread, Signal as pyqtSignal
 
@@ -44,6 +45,6 @@ class IndexWorker(QThread):
                     else:
                         continue
                 except:
-                    print(traceback.format_exc())
+                    logging.error(traceback.format_exc())
         self.indexFinished.emit(filepaths, self.root_id)
         self.quit()

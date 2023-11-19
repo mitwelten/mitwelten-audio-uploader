@@ -3,6 +3,7 @@ import hashlib
 import re
 import sqlite3
 import traceback
+import logging
 
 from PySide6.QtCore import QThread, Signal as pyqtSignal
 from concurrent.futures import ProcessPoolExecutor
@@ -129,7 +130,7 @@ def meta_worker(row):
         info['node_label'] = m.groups()[0]
 
     except Exception as e:
-        print(f'{path}: {e}')
+        logging.error(f'{path}: {e}')
         info = {}
     finally:
         info['file_id'] = file_id
@@ -171,7 +172,7 @@ class MetaWorker(QThread):
                 except:
                     break
 
-                # print(f'processing batch {1 + (i // BATCHSIZE)} of {1 + (len(records) // BATCHSIZE)} ({BATCHSIZE} items)')
+                # logging.debug(f'processing batch {1 + (i // BATCHSIZE)} of {1 + (len(records) // BATCHSIZE)} ({BATCHSIZE} items)')
                 metalist = []
                 # Using ProcessPool instread of ThreadPool saves a few seconds
                 with ProcessPoolExecutor(nthreads_meta) as executor:
@@ -212,7 +213,7 @@ class MetaWorker(QThread):
                         where file_id = ?
                         ''', [meta['file_id']])
                     except sqlite3.IntegrityError as e:
-                        print(meta['path'], e)
+                        logging.error(meta['path'], e)
                         c.execute('''
                         update files set (state, timestamp, node_label, file_size, audio_format, bit_depth, channels, duration, sample_rate, serial_number, source, gain, filter, amp_thresh, amp_trig, battery, temperature, rec_end_status, checked_at)
                         = (-2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s'))
@@ -240,14 +241,14 @@ class MetaWorker(QThread):
                 self.countChanged.emit(1 + (i // BATCHSIZE))
 
         except ShutdownRequestException or KeyboardInterrupt:
-            print('ShutdownRequestException, exiting meta extraction')
+            logging.info('ShutdownRequestException, exiting meta extraction')
         except Exception as e:
-            print(traceback.format_exc())
-            print('meta extraction error occurred, exiting')
+            logging.error(traceback.format_exc())
+            logging.error('meta extraction error occurred, exiting')
         else:
-            print('meta extraction done')
+            logging.info('meta extraction done')
         finally:
-            print('finally done')
+            logging.info('finally done')
             self.metaFinished.emit()
             c.close()
             self.database.close()

@@ -1,6 +1,10 @@
+from logging import DEBUG, INFO, WARNING, ERROR, CRITICAL as asdf
 
 APPNAME = 'Audio Uploader'
 APPAUTHOR = 'mitwelten.org'
+
+APPLOGFILE = 'mitwelten_audio_uploader.log'
+APPLOGLEVEL = DEBUG
 
 DBFILENAME = 'audiofile_index.db'
 

@@ -4,6 +4,7 @@ import time
 import jwt
 import sqlite3
 import uuid
+import logging
 
 from shiboken6 import isValid
 from PySide6.QtCore import QUrl
@@ -12,8 +13,9 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog
 from PySide6.QtNetworkAuth import QOAuth2AuthorizationCodeFlow, QOAuthHttpServerReplyHandler, QAbstractOAuth2
 
 from appdirs import AppDirs
+from logging.handlers import RotatingFileHandler
 
-from config import APPNAME, APPAUTHOR, DBFILENAME, MW_AUTHURL, MW_TOKENURL, MW_CLIENTID, MW_AUTHSCOPE
+from config import APPNAME, APPAUTHOR, APPLOGFILE, APPLOGLEVEL, DBFILENAME, MW_AUTHURL, MW_TOKENURL, MW_CLIENTID, MW_AUTHSCOPE
 from glue import chunks, RootDevice, RootDeviceSelection
 from uploader_app_main_ui import Ui_MainWindow
 from uploader_app_index_th import IndexWorker
@@ -27,6 +29,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         self.appdirs = AppDirs(APPNAME, APPAUTHOR)
         os.makedirs(self.appdirs.user_data_dir, exist_ok=True)
         self.dbpath = os.path.join(self.appdirs.user_data_dir, DBFILENAME)
+        self.logpath = os.path.join(self.appdirs.user_log_dir, 'mitwelten_audio_uploader.log')
 
         self.setupUi(self)
         self.setWindowTitle(f'{APPNAME} ({APPAUTHOR})')
@@ -112,7 +115,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
                 self.database.commit()
                 r = c.execute('select * from roots where uuid = ?', [root_uuid]).fetchone()
             else:
-                print('root already added')
+                logging.info(f'root {root} (uuid {root_uuid}) already added')
             c.close()
             self.populateRoots()
 
@@ -306,7 +309,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         self.dbReadStatus()
 
     def onTokenExpired(self):
-        print('trying to refresh the access token')
+        logging.info('trying to refresh the access token')
         self.oauth.refreshAccessToken()
 
     def stopUploadWorker(self):
@@ -338,7 +341,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
 
     def onAuthTokenChanged(self, token):
         if self.uploadWorker:
-            print('onAuthTokenChanged, setting token')
+            logging.debug('Auth-Token changed, setting token')
             self.uploadWorker.setToken(token)
 
     def authHandler(self, payload):
@@ -346,19 +349,18 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
             self.oauth.grant()
 
     def authSuccessful(self):
-        # print("Authentication successful!")
-        # print(f"Access Token: {self.oauth.token()}")
-        # self.dialog.close()
         self.pushButton_signinout.setText('Sign out')
         self.pushButton_signinout.hide()
         decoded_payload = jwt.decode(self.oauth.token(), options={"verify_signature": False})
         msg = f'''Signed in as {decoded_payload['name']} ({decoded_payload['preferred_username']})'''
+        logging.info(msg)
         self.label_signinout.setText(msg)
         self.statusbar.showMessage(msg, 3000)
         self.checkReady()
 
     def authFailed(self, error: str):
         msg = f'''Authentication error: {error}'''
+        logging.error(msg)
         self.onAuthTokenChanged(None)
         self.label_signinout.setText(msg)
         self.statusbar.showMessage(msg, 3000)
@@ -411,7 +413,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
             elif s == 42:
                 self.lcdNumber_paused.display(n)
             else:
-                print('unknown state', s)
+                logging.debug('unknown file state', s)
         c.close()
 
         if total > 0:
@@ -484,10 +486,18 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         if self.uploadWorker and isValid(self.uploadWorker) and self.uploadWorker.isRunning():
             self.stopUploadWorker()
             self.uploadWorker.wait()
+        logging.info('quitting app')
         super(QMainWindow, self).closeEvent(event)
 
 
 if __name__ == "__main__":
+    logdir = AppDirs(APPNAME, APPAUTHOR).user_log_dir
+    logfile = os.path.join(logdir, APPLOGFILE)
+    os.makedirs(logdir, exist_ok=True)
+    logging.basicConfig(level=APPLOGLEVEL,
+        handlers=[RotatingFileHandler(logfile, maxBytes=2097152, backupCount=10)],
+        format='%(asctime)s %(name)s %(levelname)s %(message)s')
+    logging.info('starting app')
     app = QApplication(sys.argv)
     window = MitweltenAudioUploaderApp()
     window.show()
