@@ -31,6 +31,7 @@ class IndexWorker(QThread):
                     break
                 filepath = os.path.abspath(os.path.join(root, file))
                 try:
+                    # audiomoth filename filter
                     m = re.match(r'\d{8}_\d{6}T?\.(wav|WAV)', file)
                     if m == None:
                         continue
