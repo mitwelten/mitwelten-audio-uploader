@@ -197,7 +197,6 @@ class UploadWorker(QThread):
                     # -6: node not deployed
                     logging.error(f'MetadataValidationException {str(e)}')
                     cur.close()
-                    queue.task_done()
 
                 except MetadataInsertException as e:
                     # -5: meta insert error
