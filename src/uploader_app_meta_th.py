@@ -213,7 +213,7 @@ class MetaWorker(QThread):
                         where file_id = ?
                         ''', [meta['file_id']])
                     except sqlite3.IntegrityError as e:
-                        logging.error(meta['path'], e)
+                        logging.error(f"{meta['path']} {e}")
                         c.execute('''
                         update files set (state, timestamp, node_label, file_size, audio_format, bit_depth, channels, duration, sample_rate, serial_number, source, gain, filter, amp_thresh, amp_trig, battery, temperature, rec_end_status, checked_at)
                         = (-2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s'))

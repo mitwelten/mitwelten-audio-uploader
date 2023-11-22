@@ -413,7 +413,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
             elif s == 42:
                 self.lcdNumber_paused.display(n)
             else:
-                logging.debug('unknown file state', s)
+                logging.debug(f'unknown file state {s}')
         c.close()
 
         if total > 0:

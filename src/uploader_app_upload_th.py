@@ -97,7 +97,7 @@ class UploadWorker(QThread):
             try:
                 conn = sqlite3.connect(self.db, check_same_thread=False)
             except Exception as e:
-                logging.error('Task setup failed:', str(e))
+                logging.error(f'Task setup failed: {str(e)}')
                 return
 
             while True:
@@ -130,7 +130,7 @@ class UploadWorker(QThread):
                     if r.status_code != 200:
                         if r.status_code == 401:
                             self.tokenExpired.emit()
-                            logging.error('Access denied, reason:', r.reason)
+                            logging.error(f'Access denied, reason: {r.reason}')
                         logging.debug(f"failed to validate metadata for {d['path']}: {r.reason}")
                         r.raise_for_status()
 
@@ -146,7 +146,7 @@ class UploadWorker(QThread):
                         conn.commit()
                         raise MetadataValidationException('node is/was not deployed at requested time:', d['node_label'], d['timestamp'])
                     else:
-                        logging.debug('new file:', validation['object_name'])
+                        logging.debug("new file: {validation['object_name']}")
                         d['object_name']   = validation['object_name']
                         d['deployment_id'] = validation['deployment_id']
 
@@ -195,13 +195,13 @@ class UploadWorker(QThread):
                 except MetadataValidationException as e:
                     # -3: meta validation error
                     # -6: node not deployed
-                    logging.error('MetadataValidationException', str(e))
+                    logging.error(f'MetadataValidationException {str(e)}')
                     cur.close()
                     queue.task_done()
 
                 except MetadataInsertException as e:
                     # -5: meta insert error
-                    logging.error('MetadataInsertException', str(e))
+                    logging.error(f'MetadataInsertException {str(e)}')
                     cur.execute('''
                     update files set (state, file_uploaded_at) = (-5, strftime('%s'))
                     where file_id = ?
@@ -212,7 +212,7 @@ class UploadWorker(QThread):
                 except FileNotFoundError:
                     # -7: file not found error
                     # file not found either when uploading or when deleting
-                    logging.error('Error during upload, file not found: ', d['path'])
+                    logging.error(f"Error during upload, file not found: {d['path']}")
                     cur.execute('''
                     update files set (state, file_uploaded_at) = (-7, strftime('%s'))
                     where file_id = ?
@@ -221,7 +221,7 @@ class UploadWorker(QThread):
                     cur.close()
 
                 except requests.exceptions.HTTPError as e:
-                    logging.error('HTTP Error:', str(e))
+                    logging.error(f'HTTP Error: {str(e)}')
                     if (e.response.status_code == 401):
                         with self.token_condition:
                             if self.is_token_valid:
@@ -240,7 +240,7 @@ class UploadWorker(QThread):
                     store_task_state(conn, record['file_id'], 1)
 
                 except requests.exceptions.ConnectionError:
-                    logging.error('Connecting Error:', str(e))
+                    logging.error(f'Connecting Error: {str(e)}')
                     # wait 10sec before trying on the next task
                     time.sleep(10)
                     # mark checked (ready for upload)
@@ -248,7 +248,7 @@ class UploadWorker(QThread):
 
                 except Exception as e:
                     # -4: file upload error
-                    logging.error('File upload error:', d['path'], str(e))
+                    logging.error(f"File upload error: {d['path']} {str(e)}")
                     logging.error(traceback.format_exc())
                     cur.execute('''
                     update files set (state, file_uploaded_at) = (-4, strftime('%s'))
@@ -339,7 +339,7 @@ class UploadWorker(QThread):
                     # try:
                     #     is_readable_file(record['path'])
                     # except:
-                    #     logging.error('file not readable, waiting 600s', record['path'])
+                    #     logging.error(f"file not readable, waiting 600s {record['path']}")
                     #     time.sleep(5) # 600
                     #     continue
 
@@ -366,7 +366,7 @@ class UploadWorker(QThread):
                 # database is probably locked, try again later
                 time.sleep(1)
             except:
-                logging.error(traceback.format_exc(), flush=True)
+                logging.error(traceback.format_exc())
                 raise Exception('some other error occurred in generator')
 
 class BearerAuth(AuthBase):
