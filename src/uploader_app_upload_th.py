@@ -147,9 +147,6 @@ class UploadWorker(QThread):
                         json={ k: d[k] for k in ('sha256', 'node_label', 'timestamp')}, auth=BearerAuth(token))
 
                     if r.status_code != 200:
-                        if r.status_code == 401:
-                            self.tokenExpired.emit()
-                            logging.error(f'{tid} Access denied, reason: {r.reason}')
                         logging.debug(f"{tid} failed to validate metadata for {d['path']}: {r.reason}")
                         r.raise_for_status()
 
