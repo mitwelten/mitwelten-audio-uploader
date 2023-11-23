@@ -123,8 +123,6 @@ class UploadWorker(QThread):
                 try:
                     record, token = queue.get()
                     logging.debug(f'{tid} got record from queue')
-                    with self.token_lock:
-                        token = self.token
                 except:
                     logging.debug(f'{tid} Exiting thread, queue is empty')
                     return
@@ -143,6 +141,8 @@ class UploadWorker(QThread):
 
                 try:
                     # validate record against database
+                    with self.token_lock:
+                        token = self.token
                     r = session.post(f'{APIRUL}/validate/audio',
                         json={ k: d[k] for k in ('sha256', 'node_label', 'timestamp')}, auth=BearerAuth(token))
 
@@ -178,6 +178,8 @@ class UploadWorker(QThread):
                     logging.debug(f'{tid} created {upload.object_name}; etag: {upload.etag}')
 
                     # store metadata in postgres
+                    with self.token_lock:
+                        token = self.token
                     r = session.post(f'{APIRUL}/ingest/audio', auth=BearerAuth(token),
                         json={ k: d[k] for k in ('object_name', 'sha256', 'timestamp', 'deployment_id', 'duration',
                                                  'serial_number', 'audio_format', 'file_size', 'sample_rate', 'bit_depth',
