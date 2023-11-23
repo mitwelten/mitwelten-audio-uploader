@@ -16,7 +16,7 @@ from minio.commonconfig import Tags
 
 from config import COLS, APIRUL
 from glue import (
-    is_readable_file, store_task_state, MetadataValidationException,
+    MetadataValidationException,
     MetadataInsertException, ShutdownRequestException, RootDevice
 )
 
@@ -46,6 +46,9 @@ class UploadWorker(QThread):
         self.token_lock = Lock()
         '`token_lock` is used to safely read the shared OAuth token `token`'
 
+        self.db_lock = Lock()
+        '`db_lock` is used to safely write to the shared database connection'
+
     def cancel(self):
         self.semaphore = False
 
@@ -61,6 +64,24 @@ class UploadWorker(QThread):
 
     def setRootPrefix(self, root_device: RootDevice):
         self.root_device = root_device
+
+    def updateDatabase(self, conn: sqlite3.Connection, sql, data=None):
+        try:
+            c = conn.cursor()
+            if data:
+                c.execute(sql, data)
+            else:
+                c.execute(sql)
+            with self.db_lock: # Acquire lock before committing
+                conn.commit()
+        except sqlite3.OperationalError as e:
+            logging.critical(f'database is still locked!!! {str(e)}')
+            logging.critical(f'updateDatabase: {traceback.format_exc()}')
+        except Exception as e:
+            logging.critical('some other error occurred in updateDatabase')
+            logging.critical(f'updateDatabase: {traceback.format_exc()}')
+        finally:
+            c.close()
 
     def run(self):
         c = self.database.cursor()
@@ -119,7 +140,6 @@ class UploadWorker(QThread):
 
                 logging.debug(f'{tid} record: {record["path"]}')
                 d = record
-                cur = conn.cursor()
 
                 try:
                     # validate record against database
@@ -137,12 +157,10 @@ class UploadWorker(QThread):
                     if validation['hash_match'] or validation['object_name_match']:
                         h = 'h' if validation['hash_match'] else ''
                         o = 'o' if validation['object_name_match'] else ''
-                        cur.execute('update files set state = -3 where file_id = ?', [d['file_id']])
-                        conn.commit()
+                        self.updateDatabase(conn, 'update files set state = -3 where file_id = ?', [d['file_id']])
                         raise MetadataValidationException(f"file exists in database ({h}{o}):", d['path'])
                     elif validation['node_deployed'] == False:
-                        cur.execute('update files set state = -6 where file_id = ?', [d['file_id']])
-                        conn.commit()
+                        self.updateDatabase(conn, 'update files set state = -6 where file_id = ?', [d['file_id']])
                         raise MetadataValidationException('node is/was not deployed at requested time:', d['node_label'], d['timestamp'])
                     else:
                         logging.debug(f"{tid} new file: {validation['object_name']}")
@@ -156,11 +174,7 @@ class UploadWorker(QThread):
                         content_type='audio/wav', tags=tags)
 
                     # store upload status
-                    cur.execute('''
-                    update files set (state, file_uploaded_at) = (2, strftime('%s'))
-                    where file_id = ?
-                    ''', [d['file_id']])
-                    conn.commit()
+                    self.updateDatabase(conn, "update files set (state, file_uploaded_at) = (2, strftime('%s')) where file_id = ? ", [d['file_id']])
                     logging.debug(f'{tid} created {upload.object_name}; etag: {upload.etag}')
 
                     # store metadata in postgres
@@ -174,49 +188,30 @@ class UploadWorker(QThread):
                     r.raise_for_status()
 
                     # store metadata status
-                    cur.execute('''
-                    update files set (state, meta_uploaded_at) = (2, strftime('%s'))
-                    where file_id = ?
-                    ''', [d['file_id']])
-                    conn.commit()
+                    self.updateDatabase(conn, " update files set (state, meta_uploaded_at) = (2, strftime('%s')) where file_id = ? ", [d['file_id']])
                     logging.debug(f'{tid} inserted metadata into database. done.')
 
                     # delete file from disk, update state
                     # os.remove(d['path'])
 
                     # record should not be deleted as the hash is used to check for duplicates
-                    cur.execute('''
-                    update files set state = 4
-                    where file_id = ?
-                    ''', [d['file_id']])
-                    conn.commit()
+                    self.updateDatabase(conn, 'update files set state = 4 where file_id = ?', [d['file_id']])
 
                 except MetadataValidationException as e:
                     # -3: meta validation error
                     # -6: node not deployed
-                    logging.error(f'MetadataValidationException {str(e)}')
-                    cur.close()
+                    logging.error(f'{tid} MetadataValidationException {str(e)}')
 
                 except MetadataInsertException as e:
                     # -5: meta insert error
                     logging.error(f'{tid} MetadataInsertException {str(e)}')
-                    cur.execute('''
-                    update files set (state, file_uploaded_at) = (-5, strftime('%s'))
-                    where file_id = ?
-                    ''', [d['file_id']])
-                    conn.commit()
-                    cur.close()
+                    self.updateDatabase(conn, "update files set (state, file_uploaded_at) = (-5, strftime('%s')) where file_id = ? ", [d['file_id']])
 
                 except FileNotFoundError:
                     # -7: file not found error
                     # file not found either when uploading or when deleting
                     logging.error(f"{tid} Error during upload, file not found: {d['path']}")
-                    cur.execute('''
-                    update files set (state, file_uploaded_at) = (-7, strftime('%s'))
-                    where file_id = ?
-                    ''', [d['file_id']])
-                    conn.commit()
-                    cur.close()
+                    self.updateDatabase(conn, "update files set (state, file_uploaded_at) = (-7, strftime('%s')) where file_id = ? ", [d['file_id']])
 
                 except requests.exceptions.HTTPError as e:
                     logging.error(f'{tid} HTTP Error: {str(e)}')
@@ -234,25 +229,20 @@ class UploadWorker(QThread):
 
                     # mark checked (ready for upload)
                     logging.debug(f'{tid} Resetting task for {d["path"]}.')
-                    store_task_state(conn, record['file_id'], 1)
+                    self.updateDatabase(conn, 'update files set state = ? where file_id = ?', [1, d['file_id']])
 
                 except requests.exceptions.ConnectionError:
                     logging.error(f'{tid} Connecting Error: {str(e)}')
                     # wait 10sec before trying on the next task
                     time.sleep(10)
                     # mark checked (ready for upload)
-                    store_task_state(conn, record['file_id'], 1)
+                    self.updateDatabase(conn, 'update files set state = ? where file_id = ?', [1, d['file_id']])
 
                 except Exception as e:
                     # -4: file upload error
                     logging.error(f"{tid} File upload error: {d['path']} {str(e)}")
                     logging.error(f'{tid} {traceback.format_exc()}')
-                    cur.execute('''
-                    update files set (state, file_uploaded_at) = (-4, strftime('%s'))
-                    where file_id = ?
-                    ''', [d['file_id']])
-                    conn.commit()
-                    cur.close()
+                    self.updateDatabase(conn, "update files set (state, file_uploaded_at) = (-4, strftime('%s')) where file_id = ? ", [d['file_id']])
                     # TODO: implement logger
                     # logger.error(traceback.format_exc())
                     # logger.error('failed uploading: deleting record from db')
@@ -345,8 +335,7 @@ class UploadWorker(QThread):
 
                     # mark file as queued
                     file_id = record['file_id']
-                    self.database.execute('update files set state = 3 where file_id = ?', [file_id])
-                    self.database.commit()
+                    self.updateDatabase(self.database, 'update files set state = 3 where file_id = ?', [file_id])
                     if (datetime.now() - timer).seconds > 10:
                         self.countChanged.emit()
                         timer = datetime.now()
@@ -360,8 +349,7 @@ class UploadWorker(QThread):
             except GeneratorExit:
                 # reset the last picked up task
                 if file_id:
-                    self.database.execute('update files set state = 1 where file_id = ?', [file_id])
-                    self.database.commit()
+                    self.updateDatabase(self.database, 'update files set state = 1 where file_id = ?', [file_id])
                 break
             except sqlite3.OperationalError as e:
                 logging.error(f'generator: {str(e)}')

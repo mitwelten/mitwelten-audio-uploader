@@ -1,5 +1,4 @@
 import os
-import sqlite3
 
 from PySide6.QtCore import QObject, Signal as pyqtSignal
 
@@ -35,12 +34,6 @@ def is_readable_dir(arg):
             raise f'{arg}: Directory not accessible'
     except Exception as e:
         raise ValueError(f'Can\'t read directory/file {arg}')
-
-def store_task_state(conn: sqlite3.Connection, file_id: int, state: int):
-    c = conn.cursor()
-    c.execute('update files set state = ? where file_id = ?', [state, file_id])
-    conn.commit()
-    c.close()
 
 class RootDevice(object):
 
