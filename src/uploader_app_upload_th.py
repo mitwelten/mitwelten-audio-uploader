@@ -8,7 +8,7 @@ import logging
 
 from PySide6.QtCore import QThread, Signal as pyqtSignal
 from multiprocessing.pool import ThreadPool
-from threading import Condition, Lock
+from threading import Condition, Lock, get_ident
 from queue import Queue, Empty as QueueEmpty
 from requests.auth import AuthBase
 from minio import Minio
@@ -70,7 +70,7 @@ class UploadWorker(QThread):
         try:
             token_expires_at = jwt.decode(self.token, options={"verify_signature": False})['exp']
             if not check_api(token_expires_at):
-                logging.warning('token expired, refreshing...')
+                logging.warning('UT: token expired, refreshing...')
                 self.tokenExpired.emit()
                 with self.token_condition:
                     self.token_condition.wait()
@@ -81,18 +81,19 @@ class UploadWorker(QThread):
             storage_crd = r.json()
             storage = connect_s3(storage_crd)
         except:
-            logging.error(traceback.format_exc())
-            logging.warning('closing session')
+            logging.error(f'UT: {traceback.format_exc()}')
+            logging.warning('UT: closing session')
             self.session.close()
             return
 
         def upload_worker(queue: Queue):
             VERBOSE = False
             session = requests.Session()
+            tid = f'T{get_ident()}'
             try:
                 conn = sqlite3.connect(self.db, check_same_thread=False)
             except Exception as e:
-                logging.error(f'Task setup failed: {str(e)}')
+                logging.error(f'{tid} Task setup failed: {str(e)}')
                 return
 
             while True:
@@ -100,13 +101,15 @@ class UploadWorker(QThread):
                 token = None
                 try:
                     record, token = queue.get()
+                    logging.debug(f'{tid} got record from queue')
                     with self.token_lock:
                         token = self.token
                 except:
-                    logging.debug('Exiting thread, queue is empty')
+                    logging.debug(f'{tid} Exiting thread, queue is empty')
                     return
 
                 if record == None:
+                    logging.debug(f'{tid} record is None, exiting thread')
                     queue.task_done()
                     return
 
@@ -114,6 +117,7 @@ class UploadWorker(QThread):
 
                 # -- testing login in REST backend removed here
 
+                logging.debug(f'{tid} record: {record["path"]}')
                 d = record
                 cur = conn.cursor()
 
@@ -125,8 +129,8 @@ class UploadWorker(QThread):
                     if r.status_code != 200:
                         if r.status_code == 401:
                             self.tokenExpired.emit()
-                            logging.error(f'Access denied, reason: {r.reason}')
-                        logging.debug(f"failed to validate metadata for {d['path']}: {r.reason}")
+                            logging.error(f'{tid} Access denied, reason: {r.reason}')
+                        logging.debug(f"{tid} failed to validate metadata for {d['path']}: {r.reason}")
                         r.raise_for_status()
 
                     validation = r.json()
@@ -141,7 +145,7 @@ class UploadWorker(QThread):
                         conn.commit()
                         raise MetadataValidationException('node is/was not deployed at requested time:', d['node_label'], d['timestamp'])
                     else:
-                        logging.debug("new file: {validation['object_name']}")
+                        logging.debug(f"{tid} new file: {validation['object_name']}")
                         d['object_name']   = validation['object_name']
                         d['deployment_id'] = validation['deployment_id']
 
@@ -157,7 +161,7 @@ class UploadWorker(QThread):
                     where file_id = ?
                     ''', [d['file_id']])
                     conn.commit()
-                    logging.debug(f'created {upload.object_name}; etag: {upload.etag}')
+                    logging.debug(f'{tid} created {upload.object_name}; etag: {upload.etag}')
 
                     # store metadata in postgres
                     r = session.post(f'{APIRUL}/ingest/audio', auth=BearerAuth(token),
@@ -175,7 +179,7 @@ class UploadWorker(QThread):
                     where file_id = ?
                     ''', [d['file_id']])
                     conn.commit()
-                    logging.debug('inserted metadata into database. done.')
+                    logging.debug(f'{tid} inserted metadata into database. done.')
 
                     # delete file from disk, update state
                     # os.remove(d['path'])
@@ -195,7 +199,7 @@ class UploadWorker(QThread):
 
                 except MetadataInsertException as e:
                     # -5: meta insert error
-                    logging.error(f'MetadataInsertException {str(e)}')
+                    logging.error(f'{tid} MetadataInsertException {str(e)}')
                     cur.execute('''
                     update files set (state, file_uploaded_at) = (-5, strftime('%s'))
                     where file_id = ?
@@ -206,7 +210,7 @@ class UploadWorker(QThread):
                 except FileNotFoundError:
                     # -7: file not found error
                     # file not found either when uploading or when deleting
-                    logging.error(f"Error during upload, file not found: {d['path']}")
+                    logging.error(f"{tid} Error during upload, file not found: {d['path']}")
                     cur.execute('''
                     update files set (state, file_uploaded_at) = (-7, strftime('%s'))
                     where file_id = ?
@@ -215,24 +219,25 @@ class UploadWorker(QThread):
                     cur.close()
 
                 except requests.exceptions.HTTPError as e:
-                    logging.error(f'HTTP Error: {str(e)}')
+                    logging.error(f'{tid} HTTP Error: {str(e)}')
                     if (e.response.status_code == 401):
                         with self.token_condition:
                             if self.is_token_valid:
-                                logging.info('Thread detected session timeout. Refreshing token.')
+                                logging.info(f'{tid} Thread detected session timeout. Refreshing token.')
                                 self.is_token_valid = False  # Mark the token as invalid
                                 self.tokenExpired.emit() # trigger token refresh
 
-                            logging.debug('Thread waiting for token to be refreshed.')
+                            logging.debug(f'{tid} Thread waiting for token to be refreshed.')
                             self.token_condition.wait()  # Wait for the token to be refreshed
-                            logging.debug('Thread refreshed the token.')
+                            logging.debug(f'{tid} Thread refreshed the token.')
                             # If failed, token is None, semaphore is false, worker thread will stop
 
                     # mark checked (ready for upload)
+                    logging.debug(f'{tid} Resetting task for {d["path"]}.')
                     store_task_state(conn, record['file_id'], 1)
 
                 except requests.exceptions.ConnectionError:
-                    logging.error(f'Connecting Error: {str(e)}')
+                    logging.error(f'{tid} Connecting Error: {str(e)}')
                     # wait 10sec before trying on the next task
                     time.sleep(10)
                     # mark checked (ready for upload)
@@ -240,8 +245,8 @@ class UploadWorker(QThread):
 
                 except Exception as e:
                     # -4: file upload error
-                    logging.error(f"File upload error: {d['path']} {str(e)}")
-                    logging.error(traceback.format_exc())
+                    logging.error(f"{tid} File upload error: {d['path']} {str(e)}")
+                    logging.error(f'{tid} {traceback.format_exc()}')
                     cur.execute('''
                     update files set (state, file_uploaded_at) = (-4, strftime('%s'))
                     where file_id = ?
@@ -255,7 +260,7 @@ class UploadWorker(QThread):
                     # TODO: query = 'DELETE FROM {}.files_image WHERE file_id = %s'.format(crd.db.schema)
                     #
                 else:
-                    logging.info(f"OK: {d['object_name']} <-- {d['path']}")
+                    logging.info(f"{tid} OK: {d['object_name']} <-- {d['path']}")
                 finally:
                     queue.task_done()
 
@@ -270,9 +275,9 @@ class UploadWorker(QThread):
             for task in tasks:
                 with self.token_condition:
                     if not self.is_token_valid:
-                        logging.debug('Tmain: waiting for token to be refreshed.')
+                        logging.debug('UT: waiting for token to be refreshed.')
                         self.token_condition.wait()
-                        logging.debug('Tmain: token refreshed.')
+                        logging.debug('UT: token refreshed.')
                 queue.put(task)
                 if not self.semaphore:
                     raise ShutdownRequestException
@@ -289,29 +294,29 @@ class UploadWorker(QThread):
             except QueueEmpty:
                 self.database.commit()
             except:
-                logging.error(traceback.format_exc())
+                logging.error(f'UT {traceback.format_exc()}')
 
             # close queue and stop worker threads
 
-            logging.debug('signaling threads to stop...')
+            logging.debug('UT: signaling threads to stop...')
             for n in range(nthreads_upload):
                 queue.put((None, None))
 
-            logging.debug('closing queue...')
+            logging.debug('UT: closing queue...')
             queue.join()
 
-            logging.debug('waiting for tasks to end...')
+            logging.debug('UT: waiting for tasks to end...')
             pool.close()
             pool.join()
-            logging.debug('done.')
+            logging.debug('UT: done.')
 
         except Exception as e:
-            logging.error(traceback.format_exc())
+            logging.error(f'UT: {traceback.format_exc()}')
 
         finally:
             self.session.close()
             self.uploadPaused.emit()
-            logging.debug('exiting uploader ctrl thread')
+            logging.debug('UT: exiting uploader ctrl thread')
             self.quit()
             self.exit()
 
@@ -348,6 +353,7 @@ class UploadWorker(QThread):
                     yield (record, self.token)
                 else:
                     # print('uploader sleeping...', end='\r')
+                    # logging.debug(f'generator: uploader sleeping...')
                     time.sleep(10)
                     if not self.semaphore:
                         break
@@ -357,11 +363,12 @@ class UploadWorker(QThread):
                     self.database.execute('update files set state = 1 where file_id = ?', [file_id])
                     self.database.commit()
                 break
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as e:
+                logging.error(f'generator: {str(e)}')
                 # database is probably locked, try again later
                 time.sleep(1)
             except:
-                logging.error(traceback.format_exc())
+                logging.error(f'generator: {traceback.format_exc()}')
                 raise Exception('some other error occurred in generator')
 
 class BearerAuth(AuthBase):

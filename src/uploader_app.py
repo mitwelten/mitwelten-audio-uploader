@@ -309,7 +309,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         self.dbReadStatus()
 
     def onTokenExpired(self):
-        logging.info('trying to refresh the access token')
+        logging.info('QT: Trying to refresh the access token')
         self.oauth.refreshAccessToken()
 
     def stopUploadWorker(self):
@@ -341,10 +341,11 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
 
     def onAuthTokenChanged(self, token):
         if self.uploadWorker:
-            logging.debug('Auth-Token changed, setting token')
+            logging.debug('QT: Auth-Token changed, setting token')
             self.uploadWorker.setToken(token)
 
     def authHandler(self, payload):
+        logging.debug(f'QT: Auth handler: {payload}')
         if 'code' in payload:
             self.oauth.grant()
 
@@ -353,14 +354,14 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         self.pushButton_signinout.hide()
         decoded_payload = jwt.decode(self.oauth.token(), options={"verify_signature": False})
         msg = f'''Signed in as {decoded_payload['name']} ({decoded_payload['preferred_username']})'''
-        logging.info(msg)
+        logging.info(f'QT: {msg}')
         self.label_signinout.setText(msg)
         self.statusbar.showMessage(msg, 3000)
         self.checkReady()
 
     def authFailed(self, error: str):
         msg = f'''Authentication error: {error}'''
-        logging.error(msg)
+        logging.error(f'QT: {msg}')
         self.onAuthTokenChanged(None)
         self.label_signinout.setText(msg)
         self.statusbar.showMessage(msg, 3000)
@@ -413,7 +414,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
             elif s == 42:
                 self.lcdNumber_paused.display(n)
             else:
-                logging.debug(f'unknown file state {s}')
+                logging.debug(f'QT: unknown file state {s}')
         c.close()
 
         if total > 0:
@@ -486,7 +487,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         if self.uploadWorker and isValid(self.uploadWorker) and self.uploadWorker.isRunning():
             self.stopUploadWorker()
             self.uploadWorker.wait()
-        logging.info('quitting app')
+        logging.info('QT: quitting app')
         super(QMainWindow, self).closeEvent(event)
 
 
