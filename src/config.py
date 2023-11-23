@@ -4,7 +4,7 @@ APPNAME = 'Audio Uploader'
 APPAUTHOR = 'mitwelten.org'
 
 APPLOGFILE = 'mitwelten_audio_uploader.log'
-APPLOGLEVEL = DEBUG
+APPLOGLEVEL = INFO
 
 DBFILENAME = 'audiofile_index.db'
 
