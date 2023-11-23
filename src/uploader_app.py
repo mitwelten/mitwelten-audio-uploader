@@ -79,6 +79,7 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
 
         # Connect signals
         reply_handler.callbackReceived.connect(self.authHandler)
+        reply_handler.tokenRequestErrorOccurred.connect(self.onTokenRequestFailed)
         self.oauth.granted.connect(self.authSuccessful)
         self.oauth.error.connect(self.authFailed)
         self.oauth.tokenChanged.connect(self.onAuthTokenChanged)
@@ -366,6 +367,9 @@ class MitweltenAudioUploaderApp(QMainWindow, Ui_MainWindow):
         self.label_signinout.setText(msg)
         self.statusbar.showMessage(msg, 3000)
         self.checkReady()
+
+    def onTokenRequestFailed(self, error: str, error_description: str):
+        logging.error(f'QT: Token request error: {error} ({error_description})')
 
     def dbReadStatus(self):
         c = self.database.cursor()
